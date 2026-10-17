@@ -2,11 +2,14 @@
 """Number the jurors in a SurveyMonkey Participant Background Questionnaire.
 
 At morning check-in each seated juror gets a juror number, recorded in the
-recruiter's sign-in workbook (on Nelson sheets: the "J#" column of "Amys Tab").
-This script copies those numbers into the SurveyMonkey background export:
+"J#" column of "Amy's tab" in the recruiter's sign-in workbook. Amy's tab is
+the only source of juror numbers - never the Juror Profiles workbook, never
+the recruiter's "#" column. This script copies those numbers into the
+SurveyMonkey background export:
 
-  * the `rq_flag` column becomes `Juror Number` (a column is inserted if the
-    export has neither),
+  * the `rq_flag` column is renamed `Juror Number` (singular: the attitudes and
+    readiness tools look for exactly that), or an existing Juror Number(s)
+    column is reused, or one is inserted after Custom Data 1,
   * each seated juror's row gets their number, matched by name,
   * rows are sorted by juror number, whole rows moving together,
   * respondents who were not seated (no-shows, alternates, partial or
@@ -21,14 +24,14 @@ Usage:
       --signin "Shared Philadelphia, PA Thursday October 1st.xlsx" \
       --out "numbered/Participant Background Questionnaire 1425.xlsx"
 
-  # numbers typed by hand instead of a sign-in workbook ("1 Jane Doe" per line):
-  python number_jurors.py --background BG.xlsx --roster roster.txt --out OUT.xlsx
-
   # confirm a pairing the script could not make on its own:
   ... --map "20=Shannon" --map "13=Stephan Rodriguez"
 
   # a seated juror who never filled out the background:
   ... --allow-missing 7
+
+  # a numbered juror who was cut and should come out of the file:
+  ... --exclude 21
 """
 from __future__ import annotations
 
@@ -148,10 +151,13 @@ def _find_name_col(hdrs: dict[int, str]):
     return None
 
 
-def read_signin(path: str, sheet: str | None = None) -> tuple[list[Seat], str]:
-    """Find the juror-number column in the sign-in workbook and return the
-    seated jurors. Every sheet is scanned unless `sheet` is given; the table
-    with the most numbered rows wins."""
+def _is_amys_tab(title: str) -> bool:
+    t = re.sub(r"[’'`\s_]+", "", title).lower()
+    return t == "amystab"
+
+
+def read_signin(path: str) -> tuple[list[Seat], str]:
+    """Seated jurors from the J# column of Amy's tab."""
     wb = openpyxl.load_workbook(path, data_only=True)
     wbf = None  # formula view, loaded only if a name cell has no cached value
 
@@ -169,54 +175,39 @@ def read_signin(path: str, sheet: str | None = None) -> tuple[list[Seat], str]:
             return src[f"{m.group(3)}{m.group(4)}"].value
         return None
 
-    sheets = [wb[sheet]] if sheet else wb.worksheets
-    found = []
-    for ws in sheets:
-        for r in range(1, min(ws.max_row, 20) + 1):
-            hdrs = {c: norm_header(ws.cell(r, c).value)
-                    for c in range(1, min(ws.max_column, 80) + 1)}
-            num_cols = [c for c, h in hdrs.items() if h and JUROR_NUM_HEADER.match(h)]
-            namecol = _find_name_col(hdrs)
-            if not num_cols or not namecol:
+    tabs = [ws for ws in wb.worksheets if _is_amys_tab(ws.title)]
+    if not tabs:
+        raise SystemExit(f"No Amy's tab in {Path(path).name} (sheets: "
+                         f"{', '.join(wb.sheetnames)}). Juror numbers only come from Amy's tab.")
+    ws = tabs[0]
+    for r in range(1, min(ws.max_row, 20) + 1):
+        hdrs = {c: norm_header(ws.cell(r, c).value)
+                for c in range(1, min(ws.max_column, 80) + 1)}
+        num_cols = [c for c, h in hdrs.items() if h and JUROR_NUM_HEADER.match(h)]
+        namecol = _find_name_col(hdrs)
+        if not num_cols or not namecol:
+            continue
+        nc = num_cols[0]
+        att = next((c for c, h in hdrs.items() if h == "attendance"), None)
+        seats = []
+        for rr in range(r + 1, ws.max_row + 1):
+            n, note = parse_num(ws.cell(rr, nc).value)
+            if n is None:
                 continue
-            nc = num_cols[0]
-            att = next((c for c, h in hdrs.items() if h == "attendance"), None)
-            seats = []
-            for rr in range(r + 1, ws.max_row + 1):
-                n, note = parse_num(ws.cell(rr, nc).value)
-                if n is None:
-                    continue
-                if namecol[0] == "single":
-                    nm = cell_value(ws, rr, namecol[1])
-                else:
-                    nm = " ".join(str(cell_value(ws, rr, c) or "").strip()
-                                  for c in namecol[1:]).strip()
-                if nm is None or not str(nm).strip():
-                    continue
-                a = str(cell_value(ws, rr, att) or "").strip() if att else ""
-                seats.append(Seat(n, str(nm).strip(), name_variants(nm), note, a))
-            if seats:
-                found.append((len(seats), f"{ws.title}!{get_column_letter(nc)}", seats))
-            break  # only the first header row per sheet
-    if not found:
-        raise SystemExit(
-            f"No juror-number column (J#, Juror #, Juror Number) with a name column "
-            f"found in {path}. Pass --sheet, or give the numbers with --roster.")
-    found.sort(key=lambda x: -x[0])
-    return found[0][2], found[0][1]
-
-
-def read_roster(path: str) -> list[Seat]:
-    seats = []
-    for line in Path(path).read_text(encoding="utf-8-sig").splitlines():
-        m = re.match(r"^\s*(?:j|juror)?\s*#?\s*(\d{1,3})\s*[.):,\t-]?\s+(.+?)\s*$", line, re.I) \
-            or re.match(r"^\s*(\d{1,3})\s*,\s*(.+?)\s*$", line)
-        if m:
-            nm = m.group(2).strip().strip(",").strip('"')
-            seats.append(Seat(int(m.group(1)), nm, name_variants(nm)))
-    if not seats:
-        raise SystemExit(f"No '<number> <name>' lines found in {path}")
-    return seats
+            if namecol[0] == "single":
+                nm = cell_value(ws, rr, namecol[1])
+            else:
+                nm = " ".join(str(cell_value(ws, rr, c) or "").strip()
+                              for c in namecol[1:]).strip()
+            if nm is None or not str(nm).strip():
+                continue
+            a = str(cell_value(ws, rr, att) or "").strip() if att else ""
+            seats.append(Seat(n, str(nm).strip(), name_variants(nm), note, a))
+        if not seats:
+            raise SystemExit(f"Amy's tab has a J# column but no numbers yet - "
+                             f"check-in may not be finished.")
+        return seats, f"{ws.title}!{get_column_letter(nc)}"
+    raise SystemExit("Amy's tab has no J# column next to a name column (Rec Names).")
 
 
 # ---------------------------------------------------------------- background
@@ -544,31 +535,35 @@ def report(seats, res: MatchResult, bg: Background, source: str, allowed_missing
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[1])
     ap.add_argument("--background", required=True, help="SurveyMonkey background export (.xlsx)")
-    src = ap.add_mutually_exclusive_group(required=True)
-    src.add_argument("--signin", help="recruiter sign-in workbook holding the J# column")
-    src.add_argument("--roster", help="text file, one '<J#> <name>' per line")
-    ap.add_argument("--sheet", help="sign-in sheet to read (default: auto-detect)")
+    ap.add_argument("--signin", required=True,
+                    help="recruiter sign-in workbook; juror numbers are read from Amy's tab")
     ap.add_argument("--out", required=True, help="where to save the numbered workbook")
     ap.add_argument("--overwrite", action="store_true", help="allow --out to be the input file")
     ap.add_argument("--map", action="append", default=[], metavar="J#=NAME",
                     help="confirmed pairing: juror number = SurveyMonkey name or Respondent ID")
     ap.add_argument("--allow-missing", default="", metavar="J#,J#",
                     help="seated jurors known to have no background submission")
+    ap.add_argument("--exclude", default="", metavar="J#,J#",
+                    help="numbered jurors to leave out (e.g. cut mid-day)")
     ap.add_argument("--dry-run", action="store_true", help="report only; write nothing")
     a = ap.parse_args(argv)
 
     if Path(a.out).resolve() == Path(a.background).resolve() and not a.overwrite:
         raise SystemExit("--out is the input file; pass --overwrite if you mean it.")
 
-    if a.signin:
-        seats, where = read_signin(a.signin, a.sheet)
-        source = f"{Path(a.signin).name} [{where}]"
-    else:
-        seats, source = read_roster(a.roster), Path(a.roster).name
+    seats, where = read_signin(a.signin)
+    source = f"{Path(a.signin).name} [{where}]"
     nums = [s.num for s in seats]
     dup = sorted({n for n in nums if nums.count(n) > 1})
     if dup:
         raise SystemExit(f"Juror number(s) used twice on the sign-in list: {dup}")
+
+    excluded = {int(x) for x in re.findall(r"\d+", a.exclude)}
+    unknown = excluded - set(nums)
+    if unknown:
+        raise SystemExit(f"--exclude {sorted(unknown)}: not on Amy's tab.")
+    left_out = [s for s in seats if s.num in excluded]
+    seats = [s for s in seats if s.num not in excluded]
 
     manual = {}
     for m in a.map:
@@ -585,7 +580,14 @@ def main(argv=None) -> int:
     if not blocked and not a.dry_run:
         write_numbered(bg, res.pairs, a.out)
         wrote = a.out
-    print(report(seats, res, bg, source, allowed, wrote))
+    text = report(seats, res, bg, source, allowed, wrote)
+    if left_out:
+        text = text.replace("\nRemoved - not seated", "\nLeft out on request (--exclude): "
+                            + ", ".join(f"J{s.num} {s.name}" for s in left_out)
+                            + "\nRemoved - not seated", 1) if "\nRemoved - not seated" in text \
+            else text + "\nLeft out on request (--exclude): " + \
+            ", ".join(f"J{s.num} {s.name}" for s in left_out)
+    print(text)
     return 2 if blocked else 0
 
 

@@ -7,12 +7,14 @@ Tools behind James's de novo Jury Consulting dashboards.
 Puts the morning check-in juror numbers into the SurveyMonkey
 `Participant Background Questionnaire ####.xlsx`, replacing the manual step.
 
-- Reads `J#` from the recruiter sign-in workbook (`Amys Tab`).
+- Reads `J#` from Amy's tab in the recruiter sign-in workbook - the only
+  source of juror numbers (never Juror Profiles).
 - Matches each seated juror to their background row by name. Recruiter
   suffixes (`***EB`, `late`, notes), nicknames, middle names, capitals and
   hyphenated surnames are all handled.
-- Renames `rq_flag` to `Juror Number`, sorts by juror number (whole rows), and
-  deletes everyone who wasn't seated.
+- Renames `rq_flag` to `Juror Number` (singular, which the attitudes dashboard
+  requires), sorts by juror number (whole rows), and deletes everyone who
+  wasn't seated. `--exclude J#` leaves out a juror who was cut.
 - Stops and asks rather than guessing when a name can't be matched.
 
 As a Claude skill: upload `skills/number-jurors/` and ask Claude to

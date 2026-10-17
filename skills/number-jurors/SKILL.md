@@ -19,14 +19,16 @@ carries them across, which James used to do by hand.
    original also lives in the case's `Consulting\Project Docs\Results\`.
 2. **The recruiter sign-in workbook** - in the case's `AdminPM\Project Management\`
    folder. Nelson sheets are named `Shared <City>, <ST> <Day> <Date> (...).xlsx`;
-   Nationwide sheets are `####_De_novo_<Place>_<date>.xlsx`. Both carry an
-   **`Amys Tab`** sheet: `Attendance | J# | Rec Names | Match/No Match | ... | SM Names`.
-   `J#` is the juror number. The main sheet's `#` column is the recruit number -
-   never use it.
+   Nationwide sheets are `####_De_novo_<Place>_<date>.xlsx`. Both carry
+   **Amy's tab** (`Amys Tab`): `Attendance | J# | Rec Names | Match/No Match | ... | SM Names`.
 
-If either file is missing, ask. If the sign-in sheet has no `J#` yet, check-in
-isn't finished - say so. If James would rather type the numbers, take a list
-(`1 Jane Doe` per line) and use `--roster` instead of `--signin`.
+**Juror numbers always come from the `J#` column of Amy's tab. Nothing else.**
+Never take them from the `#### Juror Profiles.xlsm` workbook, the recruiter's
+main-sheet `#` column (that's the recruit number), photo filenames, or row
+order. The script reads Amy's tab only and stops if the workbook doesn't have one.
+
+If either file is missing, ask. If Amy's tab has no `J#` numbers yet, check-in
+isn't finished, so say so and wait.
 
 The Microsoft 365 connector reads `.xlsx` as text but cannot hand back the file
 itself, so get real copies: stage them from James's device (`device_stage_files`),
@@ -45,16 +47,19 @@ python3 $S/number_jurors.py \
 
 Needs `openpyxl`. The script:
 
-- finds the `J#` column on whichever sheet has one (`--sheet` to force one);
+- reads the `J#` column of Amy's tab (any spelling: `Amys Tab`, `Amy's tab`);
   a J# cell like `21 MIA-CUT` counts as juror 21 and the note is reported;
   a cell with no number (`GHOSTED`, blank) means not seated;
 - reads `Rec Names` even when the formulas were never calculated;
 - matches names after stripping `***EB`, `late`, `- released at lunch...`,
   `Jr.`, middle names and initials, quoted nicknames and capitals; hyphenated
   surnames match either half;
-- writes the number into `rq_flag` renamed to **`Juror Number`**, or into an
-  existing `Juror Number(s)` column (1394 keeps it in column I), or inserts the
-  column after `Custom Data 1`;
+- renames a SurveyMonkey column to **`Juror Number`** and writes the numbers
+  there - `rq_flag` normally, or an existing `Juror Number(s)` column (1394
+  keeps it in column I), or a new column after `Custom Data 1` if neither
+  exists. Keep the header singular: the attitudes dashboard requires exactly
+  `Juror Number` and stops on `Juror Numbers`, and the readiness board looks
+  for the singular too;
 - sorts by juror number, moving **whole rows** so Respondent ID and timestamps
   stay with their person;
 - deletes non-seated respondents, duplicate submissions (keeps the fullest),
@@ -86,7 +91,7 @@ Read the report.
 - **`Check these`** lines are jurors with a number plus a note (`MIA-CUT`,
   `gone too long`), or with Attendance saying ABSENT or Released. They are
   numbered and kept. Mention them. If James wants a cut juror out, re-run with
-  that juror off the list (`--roster`) - don't edit the output by hand.
+  `--exclude 21` - don't edit the output by hand.
 - The seated count should equal the panel size James expects (usually 24-28).
 
 ## Deliver

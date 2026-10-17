@@ -154,12 +154,28 @@ def test_signin_uses_amys_tab_not_recruit_number(tmp_path):
     assert seats[7].note == "MIA-CUT"
 
 
-def test_roster_text(tmp_path):
-    p = tmp_path / "roster.txt"
-    p.write_text("J#  Name\n1 Ava Thompson\n2. Ben Carter\n3, Chloe Diaz\n#4\tDaniel Evans\n")
-    seats = nj.read_roster(str(p))
-    assert [(s.num, s.name) for s in seats] == [
-        (1, "Ava Thompson"), (2, "Ben Carter"), (3, "Chloe Diaz"), (4, "Daniel Evans")]
+def test_amys_tab_name_variants(tmp_path):
+    for title in ["Amy's Tab", "Amy’s tab", "AMYS TAB", "Amys_Tab"]:
+        assert nj._is_amys_tab(title), title
+    assert not nj._is_amys_tab("Amys Tab old copy")
+
+
+def test_only_amys_tab_is_used(tmp_path):
+    """A J# column on any other sheet is ignored; no Amy's tab is an error."""
+    p = tmp_path / "signin.xlsx"
+    make_signin(p)
+    wb = openpyxl.load_workbook(p)
+    wb["Amys Tab"].title = "Juror Profiles"
+    wb.save(p)
+    with pytest.raises(SystemExit, match="No Amy's tab"):
+        nj.read_signin(str(p))
+
+
+def test_amys_tab_without_numbers_yet(tmp_path):
+    p = tmp_path / "signin.xlsx"
+    make_signin(p, amy=[("Present", None, "Ava Thompson")])
+    with pytest.raises(SystemExit, match="check-in may not be finished"):
+        nj.read_signin(str(p))
 
 
 # ------------------------------------------------------------------ end to end
@@ -273,3 +289,15 @@ def test_duplicate_juror_numbers_rejected(tmp_path):
     make_signin(si, amy=[("Present", 1, "Ava Thompson"), ("Present", 1, "Ben Carter")])
     with pytest.raises(SystemExit, match="used twice"):
         nj.main(["--background", str(bg), "--signin", str(si), "--out", str(tmp_path / "o.xlsx")])
+
+
+def test_exclude_a_cut_juror(tmp_path, capsys):
+    bg, si, out = tmp_path / "bg.xlsx", tmp_path / "si.xlsx", tmp_path / "out.xlsx"
+    make_background(bg)
+    make_signin(si)
+    assert nj.main(["--background", str(bg), "--signin", str(si), "--out", str(out),
+                    "--allow-missing", "9", "--exclude", "8"]) == 0
+    text = capsys.readouterr().out
+    _, rows = rows_of(out)
+    assert 8 not in [r[9] for r in rows] and "Julia Nguyen" not in [r[10] for r in rows]
+    assert "Left out on request (--exclude): J8 Julia Nguyen" in text
