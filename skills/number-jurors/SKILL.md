@@ -1,6 +1,6 @@
 ---
 name: number-jurors
-description: Put the morning check-in juror numbers into a de novo mock trial's SurveyMonkey "Participant Background Questionnaire ####.xlsx" - reads the J# column from the recruiter's sign-in workbook ("Amys Tab"), matches each seated juror to their background row by name, renames rq_flag to "Juror Number", sorts the rows by juror number and deletes everyone who wasn't seated. Use whenever James asks to "number the jurors", "number the background", "add juror numbers to the SurveyMonkey background", "juror numbers for ####", or says check-in is done and the background needs numbering. Trigger on a four-digit de novo case number plus any numbering / juror number / background phrasing. Run it before demographics, attitudes, group rosters or anything else keyed on juror number. Not for Critical Insights surveys (jurors type their own number there) or for renaming photos.
+description: Put the morning check-in juror numbers into a de novo mock trial's SurveyMonkey "Participant Background Questionnaire ####.xlsx" - reads the J# column from the recruiter's sign-in workbook ("Amys Tab"), matches each seated juror to their background row by name, renames rq_flag to "Juror Number", sorts the rows by juror number, deletes everyone who wasn't seated, and combines the three-words answers into Word #1 ("Helpful, Caring, and Strong"). Use whenever James asks to "number the jurors", "number the background", "add juror numbers to the SurveyMonkey background", "juror numbers for ####", or says check-in is done and the background needs numbering. Trigger on a four-digit de novo case number plus any numbering / juror number / background phrasing. Run it before demographics, attitudes, group rosters or anything else keyed on juror number. Not for Critical Insights surveys (jurors type their own number there) or for renaming photos.
 ---
 
 # Number Jurors
@@ -63,7 +63,14 @@ Needs `openpyxl`. The script:
 - sorts by juror number, moving **whole rows** so Respondent ID and timestamps
   stay with their person;
 - deletes non-seated respondents, duplicate submissions (keeps the fullest),
-  blank partials and `Column1...` table artefact rows.
+  blank partials and `Column1...` table artefact rows;
+- combines the **three words** ("What three words would your family and
+  friends use to describe you?") into **Word #1**, exactly as James's
+  `CleanAndConcatenateXYZ` macro does: trim, capitalize the first letter,
+  lowercase the rest, join as `A, B, and C` (`Helpful, Caring, and Strong`).
+  Word #2 and #3 are left as they are. A juror who gave only two words gets
+  `A and B`. Running it again on an already-combined file doesn't
+  double-combine. `--no-three-words` skips this step.
 
 ## It never guesses
 

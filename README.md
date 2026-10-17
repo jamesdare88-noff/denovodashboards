@@ -15,6 +15,8 @@ Puts the morning check-in juror numbers into the SurveyMonkey
 - Renames `rq_flag` to `Juror Number` (singular, which the attitudes dashboard
   requires), sorts by juror number (whole rows), and deletes everyone who
   wasn't seated. `--exclude J#` leaves out a juror who was cut.
+- Combines the three-words answers into Word #1 the way the
+  `CleanAndConcatenateXYZ` macro does (`Helpful, Caring, and Strong`).
 - Stops and asks rather than guessing when a name can't be matched.
 
 As a Claude skill: upload `skills/number-jurors/` and ask Claude to

@@ -19,9 +19,12 @@ HEAD = ["Respondent ID", "Collector ID", "Start Date", "End Date", "IP Address",
         "What is your name? (First AND Last Name)", "What is your gender?",
         "What is your current age?",
         "What are the greatest sources of stress in your life? (SELECT ALL THAT APPLY.)",
-        None, None, "Did you have any problems answering any of the questions?"]
+        None, None, "Did you have any problems answering any of the questions?",
+        "What three words would your family and friends use to describe you?", None, None]
 SUB = [None] * 10 + ["Open-Ended Response", "Response", "Open-Ended Response",
-                     "Money", "Work", "Other (please specify)", "Open-Ended Response"]
+                     "Money", "Work", "Other (please specify)", "Open-Ended Response",
+                     "Word #1", "Word #2", "Word #3"]
+WORDS = ("Helpful", "caring ", "STRONG")
 
 # (SurveyMonkey name, gender, age) in export order (newest first)
 SM = [
@@ -63,11 +66,13 @@ def make_background(path, head=HEAD, sub=SUB, rows=SM):
     ws.append(head)
     ws.append(sub)
     ws.merge_cells("N1:P1")
+    ws.merge_cells("R1:T1")
     for i, (nm, g, age) in enumerate(rows):
         rid = 115186000000 + i
         vals = [rid, 440835290, f"2026-09-30 1{i % 10}:00:00", None, f"10.0.0.{i}",
                 None, None, None, None, 0.0, nm, g, age,
-                "Money" if g else None, None, None, "No" if g else None]
+                "Money" if g else None, None, None, "No" if g else None,
+                *(WORDS if g else (None, None, None))]
         vals = vals[:len(head)]
         if len(head) > len(vals):
             vals += [None] * (len(head) - len(vals))
@@ -132,6 +137,19 @@ def test_name_variants_nicknames():
     assert ["stephanie", "rodriguez"] in nj.name_variants('Stephan "Stephanie" Rodriguez')
     assert ["ron", "grindeim"] in nj.name_variants("Ronald \"Ron'' Grindeim")
     assert ["rob", "woodmansee"] in nj.name_variants('Robert " Rob" Woodmansee')
+
+
+@pytest.mark.parametrize("words,joined", [
+    (("Helpful", "caring ", "strong "), "Helpful, Caring, and Strong"),
+    (("Generous", "Thoughtful", "reasonable"), "Generous, Thoughtful, and Reasonable"),
+    (("Hard work", "Family care", "Compassion"), "Hard work, Family care, and Compassion"),
+    ((" BRAVE", "Out Going", "kind"), "Brave, Out going, and Kind"),   # macro lowercases the rest
+    (("Loyal", None, "Kind"), "Loyal and Kind"),
+    (("Loyal", "", ""), "Loyal"),
+    ((None, None, None), ""),
+])
+def test_combine_three_words_matches_macro(words, joined):
+    assert nj.combine_three_words(*words) == joined
 
 
 def test_header_regex():
@@ -218,6 +236,36 @@ def test_full_run(tmp_path, capsys):
     assert 'J8 Julia Nguyen: J# cell also says "MIA-CUT"' in text
     # near matches are flagged for a look
     assert "Henry kellumen" in text and "<- check" in text
+    # three words combined into Word #1; #2 and #3 left as they were
+    tw = [c.column for c in ws[1] if c.value and "three words" in str(c.value)][0]
+    assert ws.cell(2, tw).value == "Word #1"
+    assert {r[tw - 1] for r in rows} == {"Helpful, Caring, and Strong"}
+    assert {(r[tw], r[tw + 1]) for r in rows} == {("caring ", "STRONG")}
+    assert "Three words combined into Word #1 for 9 jurors" in text
+    assert "R1:T1" in [str(m) for m in ws.merged_cells.ranges]
+
+
+def test_three_words_not_combined_twice(tmp_path, capsys):
+    bg, si, out, out2 = (tmp_path / n for n in ("bg.xlsx", "si.xlsx", "out.xlsx", "out2.xlsx"))
+    make_background(bg)
+    make_signin(si)
+    args = ["--signin", str(si), "--allow-missing", "9"]
+    assert nj.main(["--background", str(bg), "--out", str(out)] + args) == 0
+    assert nj.main(["--background", str(out), "--out", str(out2)] + args) == 0
+    ws, rows = rows_of(out2)
+    tw = [c.column for c in ws[1] if c.value and "three words" in str(c.value)][0]
+    assert {r[tw - 1] for r in rows} == {"Helpful, Caring, and Strong"}
+
+
+def test_no_three_words_flag(tmp_path):
+    bg, si, out = tmp_path / "bg.xlsx", tmp_path / "si.xlsx", tmp_path / "out.xlsx"
+    make_background(bg)
+    make_signin(si)
+    assert nj.main(["--background", str(bg), "--signin", str(si), "--out", str(out),
+                    "--allow-missing", "9", "--no-three-words"]) == 0
+    ws, rows = rows_of(out)
+    tw = [c.column for c in ws[1] if c.value and "three words" in str(c.value)][0]
+    assert {r[tw - 1] for r in rows} == {"Helpful"}
 
 
 def test_two_rachels_never_cross(tmp_path):

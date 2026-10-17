@@ -13,7 +13,9 @@ SurveyMonkey background export:
   * each seated juror's row gets their number, matched by name,
   * rows are sorted by juror number, whole rows moving together,
   * respondents who were not seated (no-shows, alternates, partial or
-    duplicate submissions) are removed.
+    duplicate submissions) are removed,
+  * the three-words answers are combined into Word #1 the way James's
+    CleanAndConcatenateXYZ macro does it: "Helpful, Caring, and Strong".
 
 It never guesses. A seated juror whose name can't be matched with confidence
 stops the run (exit code 2) and the report lists the closest candidates, so a
@@ -57,6 +59,7 @@ JUROR_NUM_HEADER = re.compile(
 NAME_HEADERS = ("rec names", "rec name", "juror name", "juror names", "full name",
                 "name", "names", "participant", "participant name")
 BG_NAME_HEADER = re.compile(r"what is your name", re.I)
+THREE_WORDS_HEADER = re.compile(r"three words", re.I)
 NUM_VALUE = re.compile(r"^\s*(?:j|juror)?\s*#?\s*(\d{1,3})(?![\d.])\s*[-:,]?\s*(.*?)\s*$", re.I)
 JUNK_NAME = re.compile(r"^column\d+$", re.I)  # Excel-table artefact rows
 
@@ -113,6 +116,35 @@ def name_variants(raw) -> list[list[str]]:
 
 def _drop_initials(t: list[str]) -> list[str]:
     return [x for i, x in enumerate(t) if not (0 < i < len(t) - 1 and len(x) == 1)] or t
+
+
+# ---------------------------------------------------------------- three words
+
+def _cap_first(text) -> str:
+    """CapitalizeFirstWord from James's macro: trim, first letter upper,
+    everything after it lower ("caring " -> "Caring", "BRAVE" -> "Brave")."""
+    t = str(text if text is not None else "").strip()
+    return t[:1].upper() + t[1:].lower() if t else ""
+
+
+def combine_three_words(w1, w2, w3) -> str:
+    """CleanAndConcatenateXYZ: "A, B, and C". Blank answers are skipped so a
+    juror who gave two words gets "A and B" rather than "A, , and B"."""
+    parts = [p for p in (_cap_first(w1), _cap_first(w2), _cap_first(w3)) if p]
+    if len(parts) == 3:
+        return f"{parts[0]}, {parts[1]}, and {parts[2]}"
+    if len(parts) == 2:
+        return f"{parts[0]} and {parts[1]}"
+    return parts[0] if parts else ""
+
+
+def find_three_words(ws):
+    """Column of Word #1 under 'What three words would your family and
+    friends use to describe you?' (Word #2 and #3 follow it)."""
+    for c in range(1, ws.max_column + 1):
+        if THREE_WORDS_HEADER.search(norm_header(ws.cell(1, c).value)):
+            return c
+    return None
 
 
 # ---------------------------------------------------------------- inputs
@@ -423,7 +455,8 @@ def _insert_col(ws, idx: int):
         ws.merge_cells(start_row=ca[1], start_column=c1, end_row=cb[1], end_column=c2)
 
 
-def write_numbered(bg: Background, pairs: dict, out: str):
+def write_numbered(bg: Background, pairs: dict, out: str, three_words: bool = True) -> int:
+    """Write the numbered sheet; returns how many jurors got combined words."""
     ws = bg.ws
     if bg.num_col is None:
         # put it where de novo keeps it: right after "Custom Data 1", else
@@ -438,6 +471,8 @@ def write_numbered(bg: Background, pairs: dict, out: str):
     if bg.data_start > 2:
         ws.cell(2, bg.num_col).value = None
 
+    tw = find_three_words(ws) if three_words else None
+    combined = 0
     ncols = ws.max_column
     snap = {}
     for num, (r, _) in pairs.items():
@@ -456,18 +491,26 @@ def write_numbered(bg: Background, pairs: dict, out: str):
             cell.alignment = align
         ws.cell(rr, bg.num_col).value = num
         ws.cell(rr, bg.num_col).number_format = "General"
+        if tw:
+            w = [ws.cell(rr, tw + k).value for k in range(3)]
+            joined = combine_three_words(*w)
+            # already combined on an earlier run? leave it alone
+            if joined and not str(w[0] or "").strip().endswith(f"and {_cap_first(w[2])}"):
+                ws.cell(rr, tw).value = joined
+                combined += 1
     # A leftover table/filter range would point at deleted rows.
     ws.auto_filter.ref = None
     for t in list(getattr(ws, "tables", {}).keys()):
         del ws.tables[t]
     Path(out).parent.mkdir(parents=True, exist_ok=True)
     bg.wb.save(out)
+    return combined
 
 
 # ---------------------------------------------------------------- report
 
 def report(seats, res: MatchResult, bg: Background, source: str, allowed_missing,
-           wrote: str | None) -> str:
+           wrote: str | None, combined: int | None = None) -> str:
     L = []
     L.append(f"Juror numbers from: {source}")
     L.append(f"Seated jurors: {len(seats)}   Background respondents: {len(bg.respondents)}")
@@ -527,6 +570,9 @@ def report(seats, res: MatchResult, bg: Background, source: str, allowed_missing
     if wrote:
         L.append("")
         L.append(f"Wrote {len(res.pairs)} numbered jurors -> {wrote}")
+        if combined is not None:
+            L.append(f"Three words combined into Word #1 for {combined} jurors"
+                     if combined else "Three words: no 'three words' question found - skipped")
     return "\n".join(L)
 
 
@@ -545,6 +591,8 @@ def main(argv=None) -> int:
                     help="seated jurors known to have no background submission")
     ap.add_argument("--exclude", default="", metavar="J#,J#",
                     help="numbered jurors to leave out (e.g. cut mid-day)")
+    ap.add_argument("--no-three-words", action="store_true",
+                    help="don't combine the three-words answers")
     ap.add_argument("--dry-run", action="store_true", help="report only; write nothing")
     a = ap.parse_args(argv)
 
@@ -576,11 +624,13 @@ def main(argv=None) -> int:
     bg = load_background(a.background)
     res = match(seats, bg.respondents, manual)
     blocked = bool(res.ambiguous) or any(s.num not in allowed for s in res.unmatched)
-    wrote = None
+    wrote, combined = None, None
     if not blocked and not a.dry_run:
-        write_numbered(bg, res.pairs, a.out)
+        combined = write_numbered(bg, res.pairs, a.out, three_words=not a.no_three_words)
         wrote = a.out
-    text = report(seats, res, bg, source, allowed, wrote)
+        if a.no_three_words:
+            combined = None
+    text = report(seats, res, bg, source, allowed, wrote, combined)
     if left_out:
         text = text.replace("\nRemoved - not seated", "\nLeft out on request (--exclude): "
                             + ", ".join(f"J{s.num} {s.name}" for s in left_out)
