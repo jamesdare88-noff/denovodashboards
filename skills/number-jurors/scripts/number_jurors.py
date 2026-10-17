@@ -138,6 +138,12 @@ def combine_three_words(w1, w2, w3) -> str:
     return parts[0] if parts else ""
 
 
+def already_combined(w1, w2, w3) -> bool:
+    """Word #1 already holds the combined text (an earlier run did it)."""
+    last = next((w for w in (w3, w2) if str(w or "").strip()), None)
+    return bool(last) and str(w1 or "").strip().endswith(f"and {_cap_first(last)}")
+
+
 def find_three_words(ws):
     """Column of Word #1 under 'What three words would your family and
     friends use to describe you?' (Word #2 and #3 follow it)."""
@@ -495,7 +501,7 @@ def write_numbered(bg: Background, pairs: dict, out: str, three_words: bool = Tr
             w = [ws.cell(rr, tw + k).value for k in range(3)]
             joined = combine_three_words(*w)
             # already combined on an earlier run? leave it alone
-            if joined and not str(w[0] or "").strip().endswith(f"and {_cap_first(w[2])}"):
+            if joined and not already_combined(*w):
                 ws.cell(rr, tw).value = joined
                 combined += 1
     # A leftover table/filter range would point at deleted rows.

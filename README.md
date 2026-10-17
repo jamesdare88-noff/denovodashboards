@@ -32,7 +32,22 @@ python skills/number-jurors/scripts/number_jurors.py \
   --out "numbered/Participant Background Questionnaire 1425.xlsx"
 ```
 
-Exit code 2 means a juror needs confirming. The report names the closest
+Then fill the case's Juror Profiles workbook from the numbered background:
+
+```bash
+python skills/number-jurors/scripts/fill_profiles.py \
+  --background "numbered/Participant Background Questionnaire 1425.xlsx" \
+  --profiles "1425 Juror Profiles.xlsm" --case-title "1425 Connor v. Harrow-Imprimis" \
+  --out "filled/1425 Juror Profiles.xlsm"
+```
+
+It writes Demographic Data B-P and U, applies the workbook's shortening
+macros' wording, refreshes the cards, removes unused cards on smaller panels
+and sets the print header - editing only those parts of the `.xlsm`, so
+macros, photos and card formatting survive. `tidy_profiles_master.py`
+standardises a master's card names and grouping once.
+
+Exit code 2 from `number_jurors.py` means a juror needs confirming. The report names the closest
 matches; re-run with `--map "J#=SurveyMonkey name"` or `--allow-missing J#`.
 
 Tests: `python -m pytest tests`

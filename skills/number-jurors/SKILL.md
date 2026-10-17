@@ -1,6 +1,6 @@
 ---
 name: number-jurors
-description: Put the morning check-in juror numbers into a de novo mock trial's SurveyMonkey "Participant Background Questionnaire ####.xlsx" - reads the J# column from the recruiter's sign-in workbook ("Amys Tab"), matches each seated juror to their background row by name, renames rq_flag to "Juror Number", sorts the rows by juror number, deletes everyone who wasn't seated, and combines the three-words answers into Word #1 ("Helpful, Caring, and Strong"). Use whenever James asks to "number the jurors", "number the background", "add juror numbers to the SurveyMonkey background", "juror numbers for ####", or says check-in is done and the background needs numbering. Trigger on a four-digit de novo case number plus any numbering / juror number / background phrasing. Run it before demographics, attitudes, group rosters or anything else keyed on juror number. Not for Critical Insights surveys (jurors type their own number there) or for renaming photos.
+description: Put the morning check-in juror numbers into a de novo mock trial's SurveyMonkey "Participant Background Questionnaire ####.xlsx" - reads the J# column from the recruiter's sign-in workbook ("Amys Tab"), matches each seated juror to their background row by name, renames rq_flag to "Juror Number", sorts the rows by juror number, deletes everyone who wasn't seated, and combines the three-words answers into Word #1 ("Helpful, Caring, and Strong"); then fills the case's "#### Juror Profiles.xlsm" (Demographic Data B-P and U, shortened wording, unused cards removed). Use whenever James asks to "number the jurors", "number the background", "add juror numbers to the SurveyMonkey background", "juror numbers for ####", or says check-in is done and the background needs numbering. Trigger on a four-digit de novo case number plus any numbering / juror number / background phrasing. Run it before demographics, attitudes, group rosters or anything else keyed on juror number. Not for Critical Insights surveys (jurors type their own number there) or for renaming photos.
 ---
 
 # Number Jurors
@@ -111,3 +111,62 @@ it with `SendUserFile` otherwise.
 
 Reply in two or three lines: how many jurors were numbered, how many people
 were removed, and anything flagged. Don't paste the whole table unless he asks.
+
+## Then fill the Juror Profiles
+
+The numbered background feeds `JAMES DASHBOARDS\#### <caption>\#### Juror Profiles.xlsm`.
+James used to copy background columns J-X into the workbook's
+**Demographic Data** sheet (B-P) and the combined three words into column U,
+then click the shortening buttons. `fill_profiles.py` does all of it:
+
+```bash
+python3 $S/fill_profiles.py \
+  --background "Participant Background Questionnaire 1425.xlsx" \
+  --profiles "1425 Juror Profiles.xlsm" \
+  --case-title "1425 Connor v. Harrow-Imprimis" \
+  --out "/tmp/numbered/1425 Juror Profiles.xlsm"
+```
+
+- Juror N goes in row N+1, because card N's text boxes read row N+1.
+- Race, education, employment, relationship and income are shortened exactly
+  as the workbook's `Replace...Values` macros do (`Black`, `Bachelor’s`,
+  `Single`, `$75k-$99,9k` ...).
+- The card text and the text boxes are refreshed, and the workbook is set to
+  recalculate when Excel opens it.
+- On a panel smaller than the workbook (24 of 27), cards 25-27 and their
+  photos are deleted and the print area is trimmed - **only** on a tidied
+  workbook (see below). On an untidied one it says so and leaves them.
+- `--case-title` replaces the old case name in the print header. Use the case
+  folder's name.
+- Long job titles are listed: they wrap on the card, so mention them.
+
+It never saves through openpyxl - that would drop every text box and card.
+Only the Demographic Data sheet, the card drawing and workbook.xml change;
+macros, photos and card formatting are copied through untouched.
+
+After it runs, James opens the file in Excel once, adds the photos with his
+photo buttons, and saves. Commit the filled workbook over the case's copy.
+
+Photos are still his: `InsertPhotosFromFolder` down column H, then
+`RenamePicturesBasedOnLocation` (names them `Juror 1`, `Juror 2` ...), then
+`CenterMatchingObjects` (moves each `Juror N` photo onto the hidden `Juror N`
+cell label under its card). Don't rename photos or clear those labels.
+
+## One-time: tidy a Juror Profiles master
+
+`tidy_profiles_master.py` gives every card the same build and names -
+`Juror N` (photo), `Juror N Card` (group) holding `Juror N Background`,
+`Juror Na` (profile text), `Juror Nb` (three words), `Juror N Label`,
+`Juror N Line` - groups any card left as loose pieces, deletes leftovers
+hidden under the cards, fixes the hidden cell labels, restores the Age Range
+formulas and resets the print header to `#### Case Name`.
+
+```bash
+python3 $S/tidy_profiles_master.py --profiles "Juror Profiles Master Copy.xlsm" \
+  --out "Juror Profiles Master (tidied).xlsm"
+```
+
+Run it on the master once (done for the October 2026 master) or on an old
+case's workbook before filling it. It writes a new file; keep the original
+until James has opened the tidied copy in Excel and checked the cards.
+Running it again on a tidied workbook changes nothing.
